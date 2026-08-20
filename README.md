@@ -118,7 +118,8 @@ Log into the GTL server, create the gtl_server.py script, and run it:
 multipass shell gtl-server
 # (Download or copy gtl_server.py from this repository to the node)
 python3 gtl_server.py
-```(Leave this terminal window open so the server keeps running).
+```
+(Leave this terminal window open so the server keeps running).
 
 
 6. Run the Pacer on the Senders
