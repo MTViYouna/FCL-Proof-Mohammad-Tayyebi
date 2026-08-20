@@ -22,7 +22,7 @@ To simulate an overwhelmed Ethernet switch port, we used Linux Traffic Control (
 sudo tc qdisc add dev eth0 root handle 1: htb default 11
 sudo tc class add dev eth0 parent 1: classid 1:11 htb rate 100mbit
 sudo tc qdisc add dev eth0 parent 1:11 handle 10: pfifo limit 10
-
+```
 
 2. The Traffic Generators (The GPU Senders)
 We used iperf3 to generate heavy, multi-threaded TCP traffic from the 3 Sender nodes, simulating the massive burst of data that occurs during an AI synchronization phase.
@@ -38,14 +38,14 @@ In standard Ethernet networks, AI nodes fire blindly. When all three senders bur
 
 The Evidence (Uncoordinated Run):
 
-
+```bash
 [ ID] Interval           Transfer     Bitrate         Retr
 [  5]   0.00-5.00   sec  1017 MBytes  1.71 Gbits/sec   35             sender
 [  7]   0.00-5.00   sec   722 MBytes  1.21 Gbits/sec   54             sender
 [  9]   0.00-5.00   sec  1.54 GBytes  2.64 Gbits/sec   32             sender
 [ 11]   0.00-5.00   sec  1.23 GBytes  2.11 Gbits/sec   27             sender
 [SUM]   0.00-5.00   sec  4.47 GBytes  7.67 Gbits/sec  148             sender
-
+```
 148 Dropped Packets: The buffer overflowed, forcing massive retransmissions (Retr).
 
 Stranded Compute: Stream [7] only transferred 722 MBytes, while Stream [9] transferred 1.54 GBytes. The synchronization barrier cannot close until Stream 7 finishes, meaning the faster GPUs must sit completely idle waiting for the network.
@@ -55,7 +55,7 @@ We wrap the senders in the ViYouna FCL Pacer. Senders must now request a token f
 
 The Evidence (Coordinated Run):
 
-
+```bash
 Starting ViYouna DCOP Pacer...
 [-] Token denied. Waiting for fabric capacity...
 [-] Token denied. Waiting for fabric capacity...
@@ -67,7 +67,7 @@ Running iperf3 to 192.168.235.111...
 [SUM]   0.00-5.00   sec  3.20 GBytes  5.49 Gbits/sec    1             sender
 
 [+] Burst complete. Token released back to ledger.
-
+```
 
 Perfect Pacing: The application logs prove the ledger successfully stalled the 3rd node (Token denied), holding its traffic safely in software memory until physical bandwidth became available.
 
@@ -83,25 +83,24 @@ Install Canonical Multipass (Works on Windows Hyper-V, macOS, and Linux).
 
 2. Spin Up the Virtual Cluster
 Open your terminal and run these commands to create the 5 lightweight Ubuntu nodes:
-
+```bash
 multipass launch --name gtl-server --cpus 1 --mem 1G --disk 5G 
 multipass launch --name receiver --cpus 1 --mem 1G --disk 5G 
 multipass launch --name sender-1 --cpus 1 --mem 1G --disk 5G 
 multipass launch --name sender-2 --cpus 1 --mem 1G --disk 5G 
 multipass launch --name sender-3 --cpus 1 --mem 1G --disk 5G
-
-
+```
 3. Install Dependencies on All Nodes
-
+```bash
 foreach ($vm in "gtl-server", "receiver", "sender-1", "sender-2", "sender-3") { 
     multipass exec $vm -- sudo apt-get update -y 
     multipass exec $vm -- sudo apt-get install -y python3 iperf3 iproute2 
 }
-
+```
 
 4. Set Up the Receiver (The Bottleneck)
 Log into the receiver to create the network bottleneck and start the background listeners:
-
+```bash
 multipass shell receiver 
 sudo tc qdisc add dev eth0 root handle 1: htb default 11 
 sudo tc class add dev eth0 parent 1: classid 1:11 htb rate 100mbit 
@@ -110,25 +109,27 @@ iperf3 -s -p 5201 -D
 iperf3 -s -p 5202 -D 
 iperf3 -s -p 5203 -D 
 exit
-
+```
 
 5. Start the Global Token Ledger
 Log into the GTL server, create the gtl_server.py script, and run it:
 
-
+```bash
 multipass shell gtl-server
 # (Download or copy gtl_server.py from this repository to the node)
 python3 gtl_server.py
 
 (Leave this terminal window open so the server keeps running).
+```
 
 6. Run the Pacer on the Senders
 In a new terminal window, copy pacer.py from this repository to your sender nodes. Make sure to update the GTL_IP, RECEIVER_IP, and RECEIVER_PORT variables inside the script to match your local Multipass IPs. Then, trigger them simultaneously using Windows PowerShell:
-
+```bash
 Start-Job -ScriptBlock { multipass exec sender-1 -- python3 pacer.py } 
 Start-Job -ScriptBlock { multipass exec sender-2 -- python3 pacer.py } 
 Start-Job -ScriptBlock { multipass exec sender-3 -- python3 pacer.py } 
 Get-Job | Wait-Job | Receive-Job
+```
 
 
 
