@@ -60,10 +60,10 @@ Near-elimination of TCP retransmissions: Incast-driven retransmissions dropped f
 Deterministic Pacing: The FCL successfully held Node 3 in application memory for 2.01 seconds to prevent a 3-way collision on the wire.
 
 
-Conclusion & Next Steps
-Current Validation: This Proof of Concept successfully demonstrates functional application-layer ingress coordination (Level 1) and provides empirical evidence that this coordination dramatically reduces TCP retransmissions under constrained queue conditions (Level 2 & 3).
+### Conclusion & Next Steps
+**Current Validation:** This Proof of Concept successfully demonstrates functional application-layer ingress coordination (Level 1) and provides empirical evidence that this coordination dramatically reduces TCP retransmissions under constrained queue conditions (Level 2 & 3).
 
-Next Steps (Level 4 Validation): Because hypervisor virtual switches (vSwitches) utilize TSO/GSO network offloading that bypasses physical queue drops, measuring true "Barrier Completion Time" and calculating the resulting GPU "Straggler Tax" requires physical testing. The next phase of this project will involve executing this FCL architecture across physical switch ASICs to quantify the precise reduction in AI collective synchronization time.
+**Next Steps (Level 4 Validation):** Because hypervisor virtual switches (vSwitches) utilize TSO/GSO network offloading that bypasses physical queue drops, measuring true "Barrier Completion Time" and calculating the resulting GPU "Straggler Tax" requires physical testing. The next phase of this project will involve executing this FCL architecture across physical switch ASICs to quantify the precise reduction in AI collective synchronization time.
 
 How to Run This Proof of Concept (Quick Start Guide)
 1. Prerequisites
