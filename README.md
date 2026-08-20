@@ -1,8 +1,3 @@
-Here is the complete, perfectly formatted Markdown document. I have merged your header, the objective, the architecture, the **methodology**, the test results, and the business impact into one seamless flow.
-
-You can copy everything inside the code block below and paste it directly into your GitHub `README.md` file.
-
-```markdown
 # Mohammad-Tayyebi
 **#ViYouna #GTL #DCOP #FCL-Proof**
 
