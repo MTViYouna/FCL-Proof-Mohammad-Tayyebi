@@ -90,3 +90,55 @@ Running iperf3 to 192.168.235.111...
 ### Conclusion & Business Impact
 
 By shifting congestion control from reactive hardware (standard Ethernet) to proactive software orchestration (ViYouna FCL), we can flatten tail-latency variance, eliminate incast packet drops, and recover millions of dollars of stranded GPU compute over standard commodity networks.
+
+
+How to Run This Proof of Concept (Quick Start Guide)
+1. Prerequisites
+
+Install Canonical Multipass (Works on Windows Hyper-V, macOS, and Linux).
+
+2. Spin Up the Virtual Cluster
+Open your terminal and run these commands to create the 5 lightweight Ubuntu nodes:
+
+Bash
+multipass launch --name gtl-server --cpus 1 --mem 1G --disk 5G
+multipass launch --name receiver --cpus 1 --mem 1G --disk 5G
+multipass launch --name sender-1 --cpus 1 --mem 1G --disk 5G
+multipass launch --name sender-2 --cpus 1 --mem 1G --disk 5G
+multipass launch --name sender-3 --cpus 1 --mem 1G --disk 5G
+3. Install Dependencies on All Nodes
+
+Bash
+foreach ($vm in "gtl-server", "receiver", "sender-1", "sender-2", "sender-3") {
+    multipass exec $vm -- sudo apt-get update -y
+    multipass exec $vm -- sudo apt-get install -y python3 iperf3 iproute2
+}
+4. Set Up the Receiver (The Bottleneck)
+Log into the receiver to create the network bottleneck and start the background listeners:
+
+Bash
+multipass shell receiver
+sudo tc qdisc add dev eth0 root handle 1: htb default 11
+sudo tc class add dev eth0 parent 1: classid 1:11 htb rate 100mbit
+sudo tc qdisc add dev eth0 parent 1:11 handle 10: pfifo limit 10
+iperf3 -s -p 5201 -D
+iperf3 -s -p 5202 -D
+iperf3 -s -p 5203 -D
+exit
+5. Start the Global Token Ledger
+Log into the GTL server, add the gtl_server.py script, and run it:
+
+Bash
+multipass shell gtl-server
+# (Add gtl_server.py here)
+python3 gtl_server.py
+(Leave this terminal window open so the server keeps running).
+
+6. Run the Pacer on the Senders
+In a new terminal window, add pacer.py to your sender nodes. Make sure to update the GTL_IP, RECEIVER_IP, and RECEIVER_PORT variables inside the script to match your local Multipass IPs. Then, trigger them simultaneously:
+
+Bash
+Start-Job -ScriptBlock { multipass exec sender-1 -- python3 pacer.py }
+Start-Job -ScriptBlock { multipass exec sender-2 -- python3 pacer.py }
+Start-Job -ScriptBlock { multipass exec sender-3 -- python3 pacer.py }
+Get-Job | Wait-Job | Receive-Job
