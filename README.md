@@ -171,42 +171,71 @@ Look at the output now: You will see Node 3's traffic held safely in software me
 
 or run below code for Comparision
 ```bash
-Write-Host "`n====================================================" -ForegroundColor Cyan
-Write-Host " RUNNING FABRIC COORDINATION LAYER (FCL) BENCHMARK " -ForegroundColor Cyan
+Write-Host "====================================================" -ForegroundColor Cyan
+Write-Host " RUNNING DUAL BENCHMARK: WITHOUT GTL vs WITH GTL   " -ForegroundColor Cyan
 Write-Host "====================================================" -ForegroundColor Cyan
 
-# Launch processes and capture live terminal handles
+[System.Collections.ArrayList]$all_results = @()
+
+# --- TEST 1: WITHOUT GTL ---
+Write-Host "`n[*] Executing Test 1: Baseline (FCL: False)..." -ForegroundColor Yellow
+
+$p1 = Start-Process multipass -ArgumentList "exec sender-1 -- python3 workload.py 5201 False" -NoNewWindow -PassThru
+$p2 = Start-Process multipass -ArgumentList "exec sender-2 -- python3 workload.py 5202 False" -NoNewWindow -PassThru
+$p3 = Start-Process multipass -ArgumentList "exec sender-3 -- python3 workload.py 5203 False" -NoNewWindow -PassThru
+$p1, $p2, $p3 | Wait-Process
+
+# Collect Test 1 Metrics
+foreach ($item in @(@('sender-1', 5201), @('sender-2', 5202), @('sender-3', 5203))) {
+    $vm = $item[0]
+    $jsonRaw = multipass exec $vm -- cat /tmp/metrics.json
+    if ($jsonRaw) {
+        $j = $jsonRaw | ConvertFrom-Json
+        $obj = [PSCustomObject]@{
+            "Node / Port"         = "Node $($j.Port)"
+            "GTL Mode"            = "Without GTL"
+            "Wait Time"           = "$($j.WaitTime)s"
+            "Transfer Time"       = "$($j.TransferTime)s"
+            "TCP Retransmissions" = $j.Retr
+            "Network State"       = "Incast Collision"
+        }
+        $all_results.Add($obj) | Out-Null
+    }
+}
+
+Start-Sleep -Seconds 2
+
+# --- TEST 2: WITH GTL ---
+Write-Host "`n[*] Executing Test 2: Coordinated (FCL: True)..." -ForegroundColor Green
+
 $p1 = Start-Process multipass -ArgumentList "exec sender-1 -- python3 workload.py 5201 True" -NoNewWindow -PassThru
 $p2 = Start-Process multipass -ArgumentList "exec sender-2 -- python3 workload.py 5202 True" -NoNewWindow -PassThru
 $p3 = Start-Process multipass -ArgumentList "exec sender-3 -- python3 workload.py 5203 True" -NoNewWindow -PassThru
-
 $p1, $p2, $p3 | Wait-Process
 
-Write-Host "`n====================================================" -ForegroundColor Green
-Write-Host "            SUMMARY BENCHMARK RESULTS               " -ForegroundColor Green
-Write-Host "====================================================" -ForegroundColor Green
-
-[System.Collections.ArrayList]$results = @()
-
-# Dynamically parse actual execution metrics
-$nodes = @(
-    @{Port=5201; Wait="0.00s";  Trans="12.02s"; Retr=4857; State="Active Stream 1"},
-    @{Port=5203; Wait="10.58s"; Trans="5.02s";  Retr=0;    State="Held in App Memory (Queued)"},
-    @{Port=5202; Wait="16.63s"; Trans="11.02s"; Retr=4783; State="Held in App Memory (Queued)"}
-)
-
-foreach ($n in $nodes) {
-    $obj = [PSCustomObject]@{
-        "Node / Port"         = "Node $($n.Port)"
-        "FCL Active"          = "True"
-        "GTL Wait Time"       = $n.Wait
-        "Transfer Time"       = $n.Trans
-        "TCP Retransmissions" = $n.Retr
-        "Network Queue State" = $n.State
+# Collect Test 2 Metrics
+foreach ($item in @(@('sender-1', 5201), @('sender-2', 5202), @('sender-3', 5203))) {
+    $vm = $item[0]
+    $jsonRaw = multipass exec $vm -- cat /tmp/metrics.json
+    if ($jsonRaw) {
+        $j = $jsonRaw | ConvertFrom-Json
+        $state = if ($j.WaitTime -eq 0) { "Active Stream 1" } else { "Paced via GTL" }
+        $obj = [PSCustomObject]@{
+            "Node / Port"         = "Node $($j.Port)"
+            "GTL Mode"            = "With GTL"
+            "Wait Time"           = "$($j.WaitTime)s"
+            "Transfer Time"       = "$($j.TransferTime)s"
+            "TCP Retransmissions" = $j.Retr
+            "Network State"       = $state
+        }
+        $all_results.Add($obj) | Out-Null
     }
-    $results.Add($obj) | Out-Null
 }
 
-$results | Format-Table -AutoSize
+# --- COMPARISON TABLE ---
+Write-Host "`n====================================================" -ForegroundColor Green
+Write-Host "         SIDE-BY-SIDE BENCHMARK COMPARISON         " -ForegroundColor Green
+Write-Host "====================================================" -ForegroundColor Green
+$all_results | Sort-Object "Node / Port", "GTL Mode" | Format-Table -AutoSize
 
 ```
