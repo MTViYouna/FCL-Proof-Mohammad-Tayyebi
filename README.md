@@ -142,12 +142,26 @@ while True:
 python3 gtl_server.py
 (Leave this terminal window open so the server keeps running).
 
-6. Run the Pacer on the Senders
-In a new terminal window, copy pacer.py from this repository to your sender nodes. Make sure to update the GTL_IP, RECEIVER_IP, and RECEIVER_PORT variables inside the script to match your local Multipass IPs. Then, trigger them simultaneously using Windows PowerShell:
+6.Test 1 - The Baseline (Uncoordinated Run)
+First, we will intentionally cause a network incast collision to establish the baseline. We will trigger standard iperf3 bursts from all three senders at the exact same time without the Global Token Ledger.
 
+Open a new PowerShell window and run this command:
+```bash
+Start-Job -ScriptBlock { multipass exec sender-1 -- iperf3 -c [RECEIVER_IP] -p 5201 -n 50M }
+Start-Job -ScriptBlock { multipass exec sender-2 -- iperf3 -c [RECEIVER_IP] -p 5202 -n 50M }
+Start-Job -ScriptBlock { multipass exec sender-3 -- iperf3 -c [RECEIVER_IP] -p 5203 -n 50M }
+Get-Job | Wait-Job | Receive-Job
+```
+Look at the output: You will see massive TCP retransmissions (Retr) as the packets collide at the receiver's constrained queue.
+
+Step 7: Test 2 - The Coordinated Run (ViYouna FCL)
+Now, copy pacer.py from this repository to your sender nodes. Make sure to update the GTL_IP, RECEIVER_IP, and RECEIVER_PORT variables inside the script to match your local Multipass IPs.
+
+Run the exact same 3-node simultaneous burst, but this time routed through the application-layer token ledger:
 ```bash
 Start-Job -ScriptBlock { multipass exec sender-1 -- python3 pacer.py } 
 Start-Job -ScriptBlock { multipass exec sender-2 -- python3 pacer.py } 
 Start-Job -ScriptBlock { multipass exec sender-3 -- python3 pacer.py } 
 Get-Job | Wait-Job | Receive-Job
 ```
+Look at the output now: You will see Node 3's traffic held safely in software memory (Token Wait Time: ~2.01 seconds), and the TCP retransmissions drop to near zero.
