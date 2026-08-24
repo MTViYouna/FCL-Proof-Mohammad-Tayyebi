@@ -1,6 +1,8 @@
 # Mohammad-Tayyebi
 **#ViYouna #GTL #DCOP #FCL-Proof**
-
+```powershell
+.\run_benchmark.ps1
+```
 # Experimental Validation: Software-Based Ingress Coordination Reduces TCP Retransmissions
 
 ### The Objective
