@@ -1,8 +1,6 @@
 # Mohammad-Tayyebi
 **#ViYouna #GTL #DCOP #FCL-Proof**
-```powershell
-.\run_benchmark.ps1
-```
+
 # Experimental Validation: Software-Based Ingress Coordination Reduces TCP Retransmissions
 
 ### The Objective
@@ -14,7 +12,9 @@ To empirically validate that application-layer pre-transmission coordination (Th
 * **ViYouna GTL:** A software-based Global Token Ledger governing network ingress authority.
 
 ---
-
+```powershell
+.\run_benchmark.ps1
+```
 ### Methodology & Testbed Setup
 To accurately simulate a network bottleneck, we built a virtualized micro-data center using Canonical Multipass (Hyper-V). 
 
