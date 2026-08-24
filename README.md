@@ -147,10 +147,11 @@ First, we will intentionally cause a network incast collision to establish the b
 
 Open a new PowerShell window and run this command:
 ```bash
-Start-Job -ScriptBlock { multipass exec sender-1 -- iperf3 -c [RECEIVER_IP] -p 5201 -n 50M }
-Start-Job -ScriptBlock { multipass exec sender-2 -- iperf3 -c [RECEIVER_IP] -p 5202 -n 50M }
-Start-Job -ScriptBlock { multipass exec sender-3 -- iperf3 -c [RECEIVER_IP] -p 5203 -n 50M }
+Start-Job -ScriptBlock { multipass exec sender-1 -- python3 workload.py 5201 False }
+Start-Job -ScriptBlock { multipass exec sender-2 -- python3 workload.py 5202 False }
+Start-Job -ScriptBlock { multipass exec sender-3 -- python3 workload.py 5203 False }
 Get-Job | Wait-Job | Receive-Job
+
 ```
 Look at the output: You will see massive TCP retransmissions (Retr) as the packets collide at the receiver's constrained queue.
 
@@ -159,9 +160,10 @@ Now, copy pacer.py from this repository to your sender nodes. Make sure to updat
 
 Run the exact same 3-node simultaneous burst, but this time routed through the application-layer token ledger:
 ```bash
-Start-Job -ScriptBlock { multipass exec sender-1 -- python3 pacer.py } 
-Start-Job -ScriptBlock { multipass exec sender-2 -- python3 pacer.py } 
-Start-Job -ScriptBlock { multipass exec sender-3 -- python3 pacer.py } 
+Start-Job -ScriptBlock { multipass exec sender-1 -- python3 workload.py 5201 True }
+Start-Job -ScriptBlock { multipass exec sender-2 -- python3 workload.py 5202 True }
+Start-Job -ScriptBlock { multipass exec sender-3 -- python3 workload.py 5203 True }
 Get-Job | Wait-Job | Receive-Job
+
 ```
 Look at the output now: You will see Node 3's traffic held safely in software memory (Token Wait Time: ~2.01 seconds), and the TCP retransmissions drop to near zero.
