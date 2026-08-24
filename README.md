@@ -254,6 +254,16 @@ Write-Host "====================================================================
 $all_results | Sort-Object "Node / Port", "TestOrder" | Select-Object -Property "Node / Port", "GTL Mode", "GTL Granted", "Wait Time", "Transfer Time", "Throughput", "TCP Retransmits", "Measured State" | Format-Table -AutoSize
 
 ```
+```bash
+$all_results.Clear()
+
+Invoke-BenchmarkRun -Mode "False" -TestOrder 1
+Start-Sleep -Seconds 2
+Invoke-BenchmarkRun -Mode "True" -TestOrder 2
+
+$all_results | Sort-Object "Node / Port", "TestOrder" | Select-Object -Property "Node / Port", "GTL Mode", "Wait Time", "Transfer Time", "Throughput", "TCP Retransmits", "Measured State" | Format-Table -AutoSize
+
+```
 ## Empirical Results
 
 Empirical telemetry gathered across 3 concurrent 100MB sender flows over a 100Mbit constrained link:
