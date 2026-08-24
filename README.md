@@ -172,70 +172,81 @@ Look at the output now: You will see Node 3's traffic held safely in software me
 or run below code for Comparision
 ```bash
 Write-Host "====================================================" -ForegroundColor Cyan
-Write-Host " RUNNING DUAL BENCHMARK: WITHOUT GTL vs WITH GTL   " -ForegroundColor Cyan
+Write-Host " RIGOROUS DUAL BENCHMARK: BASELINE vs GTL PACED    " -ForegroundColor Cyan
 Write-Host "====================================================" -ForegroundColor Cyan
 
 [System.Collections.ArrayList]$all_results = @()
+$vms = @('sender-1', 'sender-2', 'sender-3')
 
-# --- TEST 1: WITHOUT GTL ---
-Write-Host "`n[*] Executing Test 1: Baseline (FCL: False)..." -ForegroundColor Yellow
+# Helper function to clear old state and run background nodes
+function Invoke-BenchmarkRun {
+    param([string]$Mode, [int]$TestOrder)
+    
+    # Fix 1: Delete stale metrics files across all VMs prior to launch
+    foreach ($vm in $vms) {
+        multipass exec $vm -- rm -f /tmp/metrics.json
+    }
 
-$p1 = Start-Process multipass -ArgumentList "exec sender-1 -- python3 workload.py 5201 False" -NoNewWindow -PassThru
-$p2 = Start-Process multipass -ArgumentList "exec sender-2 -- python3 workload.py 5202 False" -NoNewWindow -PassThru
-$p3 = Start-Process multipass -ArgumentList "exec sender-3 -- python3 workload.py 5203 False" -NoNewWindow -PassThru
-$p1, $p2, $p3 | Wait-Process
+    # Launch async jobs
+    $p1 = Start-Process multipass -ArgumentList "exec sender-1 -- python3 workload.py 5201 $Mode" -NoNewWindow -PassThru
+    $p2 = Start-Process multipass -ArgumentList "exec sender-2 -- python3 workload.py 5202 $Mode" -NoNewWindow -PassThru
+    $p3 = Start-Process multipass -ArgumentList "exec sender-3 -- python3 workload.py 5203 $Mode" -NoNewWindow -PassThru
 
-# Collect Test 1 Metrics
-foreach ($item in @(@('sender-1', 5201), @('sender-2', 5202), @('sender-3', 5203))) {
-    $vm = $item[0]
-    $jsonRaw = multipass exec $vm -- cat /tmp/metrics.json
-    if ($jsonRaw) {
-        $j = $jsonRaw | ConvertFrom-Json
-        $obj = [PSCustomObject]@{
-            "Node / Port"         = "Node $($j.Port)"
-            "GTL Mode"            = "Without GTL"
-            "Wait Time"           = "$($j.WaitTime)s"
-            "Transfer Time"       = "$($j.TransferTime)s"
-            "TCP Retransmissions" = $j.Retr
-            "Network State"       = "Incast Collision"
+    $p1, $p2, $p3 | Wait-Process
+
+    # Fix 2: Check process exit codes
+    if ($p1.ExitCode -ne 0 -or $p2.ExitCode -ne 0 -or $p3.ExitCode -ne 0) {
+        Write-Error "Benchmark execution failed! Exit Codes: P1=$($p1.ExitCode), P2=$($p2.ExitCode), P3=$($p3.ExitCode)"
+        return
+    }
+
+    # Collect and parse telemetry
+    foreach ($item in @(@('sender-1', 5201), @('sender-2', 5202), @('sender-3', 5203))) {
+        $vm = $item[0]
+        $jsonRaw = multipass exec $vm -- cat /tmp/metrics.json 2>$null
+        
+        if ($jsonRaw) {
+            $j = $jsonRaw | ConvertFrom-Json
+            
+            # Fix 3 & 4: Derive state dynamically from telemetry data instead of assumptions
+            $netState = if ($j.Retransmissions -gt 1000) { 
+                "High Congestion ($($j.Retransmissions) Retr)" 
+            } elseif ($j.TokenWait_s -gt 0) { 
+                "Application Paced ($($j.TokenWait_s)s Hold)" 
+            } else { 
+                "Uncongested Link" 
+            }
+
+            $obj = [PSCustomObject]@{
+                "TestOrder"          = $TestOrder
+                "Node / Port"        = "Node $($j.Port)"
+                "GTL Mode"           = if ($j.GTL_Enabled) { "With GTL" } else { "Without GTL" }
+                "GTL Granted"        = $j.GTL_Granted
+                "Wait Time"          = "$($j.TokenWait_s)s"
+                "Transfer Time"      = "$($j.TransferTime_s)s"
+                "Throughput"         = "$($j.Throughput_Mbps) Mbps"
+                "TCP Retransmits"    = $j.Retransmissions
+                "Measured State"     = $netState
+            }
+            $all_results.Add($obj) | Out-Null
         }
-        $all_results.Add($obj) | Out-Null
     }
 }
+
+# Run Benchmark 1 (Baseline)
+Write-Host "`n[*] Executing Test 1: Baseline (Without GTL)..." -ForegroundColor Yellow
+Invoke-BenchmarkRun -Mode "False" -TestOrder 1
 
 Start-Sleep -Seconds 2
 
-# --- TEST 2: WITH GTL ---
-Write-Host "`n[*] Executing Test 2: Coordinated (FCL: True)..." -ForegroundColor Green
+# Run Benchmark 2 (GTL Coordinated)
+Write-Host "`n[*] Executing Test 2: Coordinated (With GTL)..." -ForegroundColor Green
+Invoke-BenchmarkRun -Mode "True" -TestOrder 2
 
-$p1 = Start-Process multipass -ArgumentList "exec sender-1 -- python3 workload.py 5201 True" -NoNewWindow -PassThru
-$p2 = Start-Process multipass -ArgumentList "exec sender-2 -- python3 workload.py 5202 True" -NoNewWindow -PassThru
-$p3 = Start-Process multipass -ArgumentList "exec sender-3 -- python3 workload.py 5203 True" -NoNewWindow -PassThru
-$p1, $p2, $p3 | Wait-Process
-
-# Collect Test 2 Metrics
-foreach ($item in @(@('sender-1', 5201), @('sender-2', 5202), @('sender-3', 5203))) {
-    $vm = $item[0]
-    $jsonRaw = multipass exec $vm -- cat /tmp/metrics.json
-    if ($jsonRaw) {
-        $j = $jsonRaw | ConvertFrom-Json
-        $state = if ($j.WaitTime -eq 0) { "Active Stream 1" } else { "Paced via GTL" }
-        $obj = [PSCustomObject]@{
-            "Node / Port"         = "Node $($j.Port)"
-            "GTL Mode"            = "With GTL"
-            "Wait Time"           = "$($j.WaitTime)s"
-            "Transfer Time"       = "$($j.TransferTime)s"
-            "TCP Retransmissions" = $j.Retr
-            "Network State"       = $state
-        }
-        $all_results.Add($obj) | Out-Null
-    }
-}
-
-# --- COMPARISON TABLE ---
-Write-Host "`n====================================================" -ForegroundColor Green
-Write-Host "         SIDE-BY-SIDE BENCHMARK COMPARISON         " -ForegroundColor Green
-Write-Host "====================================================" -ForegroundColor Green
-$all_results | Sort-Object "Node / Port", "GTL Mode" | Format-Table -AutoSize
+# Fix 5: Sort deterministically by Test Order and Node Port
+Write-Host "`n=================================================================================" -ForegroundColor Green
+Write-Host "                        VERIFIED BENCHMARK TELEMETRY                             " -ForegroundColor Green
+Write-Host "=================================================================================" -ForegroundColor Green
+$all_results | Sort-Object "Node / Port", "TestOrder" | Select-Object -Property "Node / Port", "GTL Mode", "GTL Granted", "Wait Time", "Transfer Time", "Throughput", "TCP Retransmits", "Measured State" | Format-Table -AutoSize
 
 ```
