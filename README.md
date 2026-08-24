@@ -36,7 +36,7 @@ We then use `iperf3` to generate simultaneous TCP traffic from the 3 Senders and
 
 **2. Level 3 Validation: Coordination & Pacing**
 
-We wrapped a fixed TCP payload inside our proprietary ViYouna Pacer script.
+We wrapped a fixed TCP payload inside our proprietary ViYouna workload script.
 
 The script polls the GTL, which is configured with a strict concurrency limit, before allowing the workload to transmit. When no token is available, the workload waits in application memory rather than immediately injecting another burst into the constrained network path.
 
@@ -281,7 +281,7 @@ Look at the output for the workload telemetry and TCP retransmission count.
 
 # 7. Test 2 - The Coordinated Run (ViYouna FCL)
 
-Copy `pacer.py` from this repository to the sender nodes.
+Copy `workload.py` from this repository to the sender nodes.
 
 Update these variables inside the script to match your current Multipass addresses:
 
