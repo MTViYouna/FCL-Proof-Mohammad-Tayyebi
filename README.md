@@ -1,6 +1,6 @@
 <p><strong>#ViYouna #GTL #DCOP #FCL-Proof</strong></p>
 <h4>by Mohammad Tayyebi</h4>
-<h1>Experimental Validation: Application-Layer Ingress Pacing Mitigates TCP Retransmissions and Increases Active Throughput</h1>
+<h1>Experimental Validation: Software-Based Ingress Coordination Reduces TCP Retransmissions</h1>
 
 <h3>The Objective</h3>
 <p>To empirically demonstrate that application-layer pre-transmission admission control (the Fabric Coordination Layer) can mitigate network incast contention, reduce TCP retransmissions, and increase active flow throughput in synchronized multi-node workloads without requiring custom network hardware.</p>
@@ -16,7 +16,7 @@
 <ul>
 <li><strong>GTL Server (<code>gtl-server</code>):</strong> Central token ledger managing application admission leases.</li>
 <li><strong>Sender VMs (<code>sender-1</code>, <code>sender-2</code>, <code>sender-3</code>):</strong> Compute nodes executing parallel 30MB TCP workloads.</li>
-<li><strong>Receiver VM (<code>receiver</code>):</strong> Ingress target configured with a 100 Mbit/s Linux Traffic Control (<code>tbf</code>) queue constraint.</li>
+<li><strong>Receiver VM (<code>receiver</code>):</strong> Ingress target configured with a controlled 100 Mbit/s Linux Traffic Control (<code>tbf</code>) queue constraint.</li>
 </ul>
 
 <hr>
@@ -41,9 +41,11 @@
 
 <h2>2. Deploy Cluster Infrastructure</h2>
 <pre><code>.\setup.ps1</code></pre>
+<p><em>This script provisions all 5 Ubuntu VMs, installs system dependencies (<code>python3</code>, <code>iperf3</code>, <code>iproute2</code>), and deploys the workload scripts to their respective nodes.</em></p>
 
 <h2>3. Execute Dual Benchmark (1-Token Policy)</h2>
 <pre><code>.\run_benchmark.ps1 1</code></pre>
+<p><em>The orchestrator configures the receiver queue (via <code>setup_receiver.sh</code>), initializes the GTL server with 1 token, executes the Baseline and FCL runs sequentially, and parses verified telemetry from <code>iperf3</code> JSON telemetry.</em></p>
 
 <hr>
 
@@ -140,7 +142,7 @@
 Coordinated total TCP retransmissions: <strong>0 retransmissions</strong></p>
 
 <blockquote>
-  <p><strong>Note:</strong> Telemetry reflects kernel-reported TCP retransmissions from <code>iperf3</code> application output during this single test run. Hardware qdisc drop counters (<code>tc -s</code>) were not logged during this execution.</p>
+  <p><strong>Note:</strong> Telemetry reflects kernel-reported TCP retransmissions from <code>iperf3</code> JSON telemetry during this single test run. Direct hardware qdisc drop counters (<code>tc -s qdisc</code>) represent a primary measurement target for Level 4 validation.</p>
 </blockquote>
 
 <hr>
@@ -154,7 +156,7 @@ Coordinated total TCP retransmissions: <strong>0 retransmissions</strong></p>
 3. Node 5202 ──► Granted at 6.04s  ──► Transfer: 3.01s (90.14 Mbps)
 </code></pre>
 
-<p>FCL changes <strong>when workloads are admitted to the socket</strong>. Controlling admission concurrency isolates individual flows onto an unbuffered path, trading application queue time for loss-free network transmission.</p>
+<p>The GTL changes <strong>when the workload is admitted to the network socket</strong>, rather than simply increasing the physical network rate. Controlling admission concurrency isolates individual flows onto an unbuffered path, trading application queue time for loss-free network transmission.</p>
 
 <hr>
 
@@ -182,11 +184,11 @@ TCP Contention & Window Backoff
         ▼
 GTL Lease Request (UDP:5000)
         │
-        ├──────────────► Node 5201 Granted (0.00s wait) ──► 90.15 Mbps (0 Retransmits)
+        ├──────────────► Node 5201 Granted (0.00s wait) ──► 1 Active Flow (90.15 Mbps)
         │
-        ├──────────────► Node 5203 Granted (2.42s wait) ──► 90.13 Mbps (0 Retransmits)
+        ├──────────────► Node 5203 Waits in RAM (2.42s)  ──► Sequential Execution
         │
-        └──────────────► Node 5202 Granted (6.04s wait) ──► 90.14 Mbps (0 Retransmits)
+        └──────────────► Node 5202 Waits in RAM (6.04s)  ──► Sequential Execution
 </code></pre>
 
 <hr>
