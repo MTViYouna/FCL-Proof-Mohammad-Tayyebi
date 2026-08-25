@@ -29,9 +29,6 @@ foreach ($vm in $vms) {
 $gtl_ip = (multipass info gtl-server --format json | ConvertFrom-Json).info.'gtl-server'.ipv4[0]
 $rcv_ip = (multipass info receiver --format json | ConvertFrom-Json).info.receiver.ipv4[0]
 
-Write-Host "`n[*] GTL Server IP : $gtl_ip" -ForegroundColor Green
-Write-Host "[*] Receiver IP   : $rcv_ip" -ForegroundColor Green
-
 Write-Host "`n[*] Deploying scripts..." -ForegroundColor Yellow
 foreach ($vm in "sender-1", "sender-2", "sender-3") {
     multipass transfer "$ScriptDir/workload.py" "${vm}:/home/ubuntu/workload.py"
@@ -42,6 +39,5 @@ Write-Host "`n[*] Starting GTL Server..." -ForegroundColor Yellow
 multipass exec gtl-server -- pkill -f gtl_server.py 2>$null
 multipass exec gtl-server -- nohup python3 /home/ubuntu/gtl_server.py > /home/ubuntu/gtl_server.log 2>&1 &
 Start-Sleep -Seconds 2
-multipass exec gtl-server -- pgrep -af gtl_server.py
 
 Write-Host "[+] Setup Complete." -ForegroundColor Green
