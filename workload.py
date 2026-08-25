@@ -46,7 +46,7 @@ try:
         print(f"\n[Port {PORT}] TOKEN GRANTED! (Wait: {wait_time:.2f}s)")
 
     t1 = time.time()
-    cmd = ["iperf3", "-c", RECEIVER_IP, "-p", str(PORT), "-n", "30M", "-b", "90M", "-J"]
+    cmd = ["iperf3", "-c", RECEIVER_IP, "-p", str(PORT), "-n", "100M", "-b", "90M", "-J"]
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     t2 = time.time()
     
