@@ -2,42 +2,70 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 if (-not $ScriptDir) { $ScriptDir = $PWD.Path }
 
-Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host " ViYouna FCL Proof - Automated Setup" -ForegroundColor Cyan
-Write-Host "==============================================" -ForegroundColor Cyan
-
-$vms = @("gtl-server", "receiver", "sender-1", "sender-2", "sender-3")
-
-Write-Host "`n[*] Checking Multipass & VMs..." -ForegroundColor Yellow
-$existingVms = multipass list | Out-String
-
-foreach ($vm in $vms) {
-    if ($existingVms -match "\b$vm\b") {
-        Write-Host "[*] $vm already exists. Skipping launch." -ForegroundColor DarkGray
-    } else {
-        Write-Host "[*] Launching $vm..." -ForegroundColor Yellow
-        multipass launch 26.04 --name $vm --cpus 1 --mem 1G --disk 5G
-    }
-}
-
-foreach ($vm in $vms) {
-    Write-Host "[*] Updating dependencies on $vm..." -ForegroundColor Yellow
-    multipass exec $vm -- sudo apt-get update -y
-    multipass exec $vm -- sudo apt-get install -y python3 iperf3 iproute2
-}
+Write-Host "====================================================" -ForegroundColor Cyan
+Write-Host " FABRIC COORDINATION LAYER (FCL) BENCHMARK SUITE   " -ForegroundColor Cyan
+Write-Host "====================================================" -ForegroundColor Cyan
 
 $gtl_ip = (multipass info gtl-server --format json | ConvertFrom-Json).info.'gtl-server'.ipv4[0]
 $rcv_ip = (multipass info receiver --format json | ConvertFrom-Json).info.receiver.ipv4[0]
+$vms = @('sender-1', 'sender-2', 'sender-3')
 
-Write-Host "`n[*] Deploying scripts..." -ForegroundColor Yellow
-foreach ($vm in "sender-1", "sender-2", "sender-3") {
+Write-Host "`n[*] Deploying scripts to cluster..." -ForegroundColor Yellow
+multipass transfer "$ScriptDir/setup_receiver.sh" receiver:/home/ubuntu/setup_receiver.sh
+foreach ($vm in $vms) {
     multipass transfer "$ScriptDir/workload.py" "${vm}:/home/ubuntu/workload.py"
 }
-multipass transfer "$ScriptDir/gtl_server.py" "gtl-server:/home/ubuntu/gtl_server.py"
 
-Write-Host "`n[*] Starting GTL Server..." -ForegroundColor Yellow
-multipass exec gtl-server -- pkill -f gtl_server.py 2>$null
-multipass exec gtl-server -- nohup python3 /home/ubuntu/gtl_server.py > /home/ubuntu/gtl_server.log 2>&1 &
+[System.Collections.ArrayList]$all_results = @()
+
+function Invoke-BenchmarkRun {
+    param([string]$Mode, [int]$TestOrder)
+
+    Write-Host "`n-----------------------------------------------" -ForegroundColor Cyan
+    Write-Host " PREPARING TEST $TestOrder (FCL: $Mode)" -ForegroundColor Yellow
+    Write-Host "-----------------------------------------------" -ForegroundColor Cyan
+
+    multipass exec receiver -- bash /home/ubuntu/setup_receiver.sh | Out-Null
+    $resetCmd = "import socket,json; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(2); s.sendto(json.dumps({'action':'reset'}).encode(), ('$gtl_ip', 5000))"
+    multipass exec sender-1 -- python3 -c $resetCmd
+
+    foreach ($vm in $vms) { multipass exec $vm -- rm -f /tmp/metrics.json }
+
+    $p1 = Start-Process multipass -ArgumentList "exec sender-1 -- python3 /home/ubuntu/workload.py 5201 $Mode $gtl_ip $rcv_ip" -NoNewWindow -PassThru
+    $p2 = Start-Process multipass -ArgumentList "exec sender-2 -- python3 /home/ubuntu/workload.py 5202 $Mode $gtl_ip $rcv_ip" -NoNewWindow -PassThru
+    $p3 = Start-Process multipass -ArgumentList "exec sender-3 -- python3 /home/ubuntu/workload.py 5203 $Mode $gtl_ip $rcv_ip" -NoNewWindow -PassThru
+
+    $p1, $p2, $p3 | Wait-Process
+
+    foreach ($item in @(@('sender-1', 5201), @('sender-2', 5202), @('sender-3', 5203))) {
+        $vm = $item[0]
+        $jsonRaw = multipass exec $vm -- cat /tmp/metrics.json 2>$null
+        
+        if (-not $jsonRaw) { throw "CRITICAL FAILURE: No metrics.json returned from $vm." }
+        try { $j = $jsonRaw | ConvertFrom-Json } 
+        catch { throw "CRITICAL FAILURE: Invalid JSON telemetry returned from $vm." }
+
+        $netState = if ($j.GTL_Enabled -and $j.TokenWait_s -gt 0) { "Application Paced" } 
+                    elseif ($j.Retransmissions -gt 0) { "TCP Retransmissions Observed" } 
+                    else { "No Retransmissions Reported" }
+
+        $obj = [PSCustomObject]@{
+            "TestOrder"       = $TestOrder
+            "Node / Port"     = "Node $($j.Port)"
+            "GTL Mode"        = if ($j.GTL_Enabled) { "With GTL" } else { "Without GTL" }
+            "Wait Time"       = "$($j.TokenWait_s)s"
+            "Transfer Time"   = "$($j.TransferTime_s)s"
+            "Throughput"      = "$($j.Throughput_Mbps) Mbps"
+            "TCP Retransmits" = $j.Retransmissions
+            "Measured State"  = $netState
+        }
+        $all_results.Add($obj) | Out-Null
+    }
+}
+
+Invoke-BenchmarkRun -Mode "False" -TestOrder 1
 Start-Sleep -Seconds 2
+Invoke-BenchmarkRun -Mode "True" -TestOrder 2
 
-Write-Host "[+] Setup Complete." -ForegroundColor Green
+Write-Host "`n=================================================================================" -ForegroundColor Green
+$all_results | Sort-Object "Node / Port", "TestOrder" | Select-Object "Node / Port", "GTL Mode", "Wait Time", "Transfer Time", "Throughput", "TCP Retransmits", "Measured State" | Format-Table -AutoSize
