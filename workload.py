@@ -9,7 +9,6 @@ FCL_ACTIVE = sys.argv[2] == "True"
 GTL_IP = sys.argv[3]
 RECEIVER_IP = sys.argv[4]
 METRICS_PATH = "/tmp/metrics.json"
-CLIENT_ID = f"port_{PORT}"
 
 if os.path.exists(METRICS_PATH): 
     os.remove(METRICS_PATH)
@@ -24,9 +23,7 @@ try:
         t0 = time.time()
         while True:
             try:
-                payload = json.dumps({"action": "request", "client_id": CLIENT_ID}).encode("utf-8")
-                sock.sendto(payload, (GTL_IP, 5000))
-                
+                sock.sendto(json.dumps({"action": "request"}).encode("utf-8"), (GTL_IP, 5000))
                 data, _ = sock.recvfrom(1024)
                 if json.loads(data.decode("utf-8")).get("status") == "granted":
                     gtl_granted = True
@@ -46,22 +43,24 @@ try:
         print(f"\n[Port {PORT}] TOKEN GRANTED! (Wait: {wait_time:.2f}s)")
 
     t1 = time.time()
-    cmd = ["iperf3", "-c", RECEIVER_IP, "-p", str(PORT), "-n", "30M", "-b", "90M", "-J"]
+    # 100 MB workload payload over receiver IP
+    cmd = ["iperf3", "-c", RECEIVER_IP, "-p", str(PORT), "-n", "100M", "-J"]
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     t2 = time.time()
     
-    # FAIL FAST: Do not generate metrics on failed transfers
+    # FAIL FAST: Abort process if iperf3 exits with non-zero status
     if res.returncode != 0:
-        print(f"\n[!] iperf3 failed explicitly on Port {PORT}. Stderr: {res.stderr}")
+        print(f"\n[!] iperf3 execution failed on Port {PORT}. Stderr: {res.stderr}")
         sys.exit(1)
 
+    # FAIL FAST: Validate telemetry JSON structure before writing metrics
     try:
         data = json.loads(res.stdout)
         total_retr = int(data["end"]["sum_sent"]["retransmits"])
         bps = data["end"]["sum_sent"]["bits_per_second"] / 1e6
         transfer_time = t2 - t1
     except (json.JSONDecodeError, KeyError) as e:
-        print(f"\n[!] Unable to parse iperf3 telemetry on Port {PORT}: {e}")
+        print(f"\n[!] Critical parsing error on Port {PORT}: {e}")
         sys.exit(1)
 
     metrics = {
@@ -79,8 +78,7 @@ try:
 finally:
     if FCL_ACTIVE and gtl_granted:
         try: 
-            payload = json.dumps({"action": "release", "client_id": CLIENT_ID}).encode("utf-8")
-            sock.sendto(payload, (GTL_IP, 5000))
+            sock.sendto(json.dumps({"action": "release"}).encode("utf-8"), (GTL_IP, 5000))
         except Exception: 
             pass
     sock.close()
