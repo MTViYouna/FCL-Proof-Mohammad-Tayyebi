@@ -1,3 +1,7 @@
+$ErrorActionPreference = "Stop"
+$ScriptDir = $PSScriptRoot
+if (-not $ScriptDir) { $ScriptDir = $PWD.Path }
+
 Write-Host "====================================================" -ForegroundColor Cyan
 Write-Host " FABRIC COORDINATION LAYER (FCL) BENCHMARK SUITE   " -ForegroundColor Cyan
 Write-Host "====================================================" -ForegroundColor Cyan
@@ -7,9 +11,9 @@ $rcv_ip = (multipass info receiver --format json | ConvertFrom-Json).info.receiv
 $vms = @('sender-1', 'sender-2', 'sender-3')
 
 Write-Host "`n[*] Deploying scripts to cluster..." -ForegroundColor Yellow
-multipass transfer setup_receiver.sh receiver:/home/ubuntu/setup_receiver.sh
+multipass transfer "$ScriptDir/setup_receiver.sh" receiver:/home/ubuntu/setup_receiver.sh
 foreach ($vm in $vms) {
-    multipass transfer workload.py "${vm}:/home/ubuntu/workload.py"
+    multipass transfer "$ScriptDir/workload.py" "${vm}:/home/ubuntu/workload.py"
 }
 
 [System.Collections.ArrayList]$all_results = @()
@@ -21,16 +25,13 @@ function Invoke-BenchmarkRun {
     Write-Host " PREPARING TEST $TestOrder (FCL: $Mode)" -ForegroundColor Yellow
     Write-Host "-----------------------------------------------" -ForegroundColor Cyan
 
-    # 1. Guarantee Clean Network State
     Write-Host "[*] Resetting Receiver Queues & Daemons..."
     multipass exec receiver -- bash /home/ubuntu/setup_receiver.sh | Out-Null
 
-    # 2. Guarantee Clean Token Ledger
     Write-Host "[*] Resetting GTL Server Tokens..."
-    $resetCmd = "import socket,json; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.sendto(json.dumps({'action':'reset'}).encode(), ('$gtl_ip', 5000))"
+    $resetCmd = "import socket,json; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(2); s.sendto(json.dumps({'action':'reset'}).encode(), ('$gtl_ip', 5000))"
     multipass exec sender-1 -- python3 -c $resetCmd
 
-    # 3. Clear Stale Telemetry
     foreach ($vm in $vms) { multipass exec $vm -- rm -f /tmp/metrics.json }
 
     Write-Host "[*] Launching Workloads..." -ForegroundColor Yellow
@@ -44,24 +45,31 @@ function Invoke-BenchmarkRun {
         $vm = $item[0]
         $jsonRaw = multipass exec $vm -- cat /tmp/metrics.json 2>$null
         
-        if ($jsonRaw) {
-            $j = $jsonRaw | ConvertFrom-Json
-            $netState = if ($j.GTL_Enabled -and $j.TokenWait_s -gt 0) { "Application Paced" } 
-                        elseif ($j.Retransmissions -gt 0) { "TCP Retransmissions Observed" } 
-                        else { "No Retransmissions Reported" }
-
-            $obj = [PSCustomObject]@{
-                "TestOrder"       = $TestOrder
-                "Node / Port"     = "Node $($j.Port)"
-                "GTL Mode"        = if ($j.GTL_Enabled) { "With GTL" } else { "Without GTL" }
-                "Wait Time"       = "$($j.TokenWait_s)s"
-                "Transfer Time"   = "$($j.TransferTime_s)s"
-                "Throughput"      = "$($j.Throughput_Mbps) Mbps"
-                "TCP Retransmits" = $j.Retransmissions
-                "Measured State"  = $netState
-            }
-            $all_results.Add($obj) | Out-Null
+        if (-not $jsonRaw) {
+            throw "CRITICAL FAILURE: No metrics.json returned from $vm. The process likely crashed."
         }
+        
+        try {
+            $j = $jsonRaw | ConvertFrom-Json
+        } catch {
+            throw "CRITICAL FAILURE: Invalid JSON telemetry returned from $vm. Raw output: $jsonRaw"
+        }
+
+        $netState = if ($j.GTL_Enabled -and $j.TokenWait_s -gt 0) { "Application Paced" } 
+                    elseif ($j.Retransmissions -gt 0) { "TCP Retransmissions Observed" } 
+                    else { "No Retransmissions Reported" }
+
+        $obj = [PSCustomObject]@{
+            "TestOrder"       = $TestOrder
+            "Node / Port"     = "Node $($j.Port)"
+            "GTL Mode"        = if ($j.GTL_Enabled) { "With GTL" } else { "Without GTL" }
+            "Wait Time"       = "$($j.TokenWait_s)s"
+            "Transfer Time"   = "$($j.TransferTime_s)s"
+            "Throughput"      = "$($j.Throughput_Mbps) Mbps"
+            "TCP Retransmits" = $j.Retransmissions
+            "Measured State"  = $netState
+        }
+        $all_results.Add($obj) | Out-Null
     }
 }
 
