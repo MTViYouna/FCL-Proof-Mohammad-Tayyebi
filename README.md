@@ -59,6 +59,7 @@
       <th>GTL Mode</th>
       <th>App Wait Time</th>
       <th>Active Transfer Time</th>
+      <th>Flow Finish Time</th>
       <th>Throughput</th>
       <th>TCP Retransmissions</th>
       <th>Measured Network State</th>
@@ -70,6 +71,7 @@
       <td>Without GTL</td>
       <td>0.00s</td>
       <td>6.06s</td>
+      <td>6.06s</td>
       <td>43.15 Mbps</td>
       <td>68</td>
       <td>TCP Retransmissions Observed</td>
@@ -78,6 +80,7 @@
       <td><strong>Node 5201</strong></td>
       <td><strong>With GTL (1 Token)</strong></td>
       <td><strong>0.00s</strong></td>
+      <td><strong>3.01s</strong></td>
       <td><strong>3.01s</strong></td>
       <td><strong>90.15 Mbps</strong></td>
       <td><strong>0</strong></td>
@@ -88,6 +91,7 @@
       <td>Without GTL</td>
       <td>0.00s</td>
       <td>5.11s</td>
+      <td>5.11s</td>
       <td>58.90 Mbps</td>
       <td>334</td>
       <td>TCP Retransmissions Observed</td>
@@ -97,6 +101,7 @@
       <td><strong>With GTL (1 Token)</strong></td>
       <td><strong>6.04s</strong></td>
       <td><strong>3.01s</strong></td>
+      <td><strong>9.05s</strong></td>
       <td><strong>90.14 Mbps</strong></td>
       <td><strong>0</strong></td>
       <td><strong>Application Paced</strong></td>
@@ -105,6 +110,7 @@
       <td><strong>Node 5203</strong></td>
       <td>Without GTL</td>
       <td>0.00s</td>
+      <td>8.30s</td>
       <td>8.30s</td>
       <td>42.86 Mbps</td>
       <td>6</td>
@@ -115,6 +121,7 @@
       <td><strong>With GTL (1 Token)</strong></td>
       <td><strong>2.42s</strong></td>
       <td><strong>3.01s</strong></td>
+      <td><strong>5.43s</strong></td>
       <td><strong>90.13 Mbps</strong></td>
       <td><strong>0</strong></td>
       <td><strong>Application Paced</strong></td>
@@ -147,13 +154,67 @@ Coordinated total TCP retransmissions: <strong>0 retransmissions</strong></p>
 
 <hr>
 
-<h1>Application Waiting vs Active Network Transfer</h1>
-<p>Sequential token allocation created the following execution order:</p>
+<h3>3. <strong>Collective Barrier Completion Time Trade-off (+9.0% Wall-Clock Latency)</strong></h3>
+<p>Baseline Collective Barrier Completion Time (Uncoordinated):<br>
+<code>max(6.06s, 5.11s, 8.30s) = 8.30 seconds</code></p>
+<p>Coordinated Collective Barrier Completion Time (1-Token Policy):<br>
+<code>max(3.01s, 9.05s, 5.43s) = 9.05 seconds</code></p>
+<p>Calculated Barrier Latency Impact:<br>
+<code>(9.05 / 8.30 - 1) * 100 = +9.0% overall wall-clock time</code></p>
 
-<pre><code>Flow Execution Order:
-1. Node 5201 ──► Granted at 0.00s  ──► Transfer: 3.01s (90.15 Mbps)
-2. Node 5203 ──► Granted at 2.42s  ──► Transfer: 3.01s (90.13 Mbps)
-3. Node 5202 ──► Granted at 6.04s  ──► Transfer: 3.01s (90.14 Mbps)
+<p><strong>Analytical Finding:</strong> Strict single-token admission control doubles active flow throughput and eliminates retransmissions, but introduces an application queuing delay that extends total wall-clock barrier execution from 8.30s to 9.05s (+9.0%). This demonstrates the fundamental architectural trade-off between individual flow serialization and aggregate collective synchronization latency.</p>
+
+<hr>
+
+<h3>4. <strong>The Token Concurrency Optimization Hypothesis</strong></h3>
+<p>Evaluating this trade-off establishes the core research question for multi-node admission control across varying token concurrency limits:</p>
+
+<table border="1" cellpadding="6" cellspacing="0">
+  <thead>
+    <tr>
+      <th>Token Concurrency Limit</th>
+      <th>Network Contention State</th>
+      <th>TCP Retransmissions</th>
+      <th>Active Throughput</th>
+      <th>Collective Barrier Time</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1 Token (Strict Serial)</strong></td>
+      <td>Zero Contention</td>
+      <td>0 Retransmits</td>
+      <td>90.14 Mbps (Max)</td>
+      <td>9.05s (Extended by App Wait)</td>
+    </tr>
+    <tr>
+      <td><strong>2 Tokens (Balanced Target)</strong></td>
+      <td>Moderate Contention</td>
+      <td>Low (Hypothesized)</td>
+      <td>High (Shared Link)</td>
+      <td><strong>Optimal Barrier Target (TBD)</strong></td>
+    </tr>
+    <tr>
+      <td><strong>3 Tokens (Baseline Uncoordinated)</strong></td>
+      <td>Severe Bottleneck Overflow</td>
+      <td>408 Retransmits</td>
+      <td>48.30 Mbps (Degraded)</td>
+      <td>8.30s (Incast Constrained)</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h1>Application Waiting vs Active Network Transfer</h1>
+<p>Sequential token allocation created the following execution order and wall-clock finish times:</p>
+
+<pre><code>Flow Execution & Finish Order:
+1. Node 5201 ──► Granted: 0.00s ──► Active: 3.01s ──► Finished at 3.01s (90.15 Mbps)
+2. Node 5203 ──► Granted: 2.42s ──► Active: 3.01s ──► Finished at 5.43s (90.13 Mbps)
+3. Node 5202 ──► Granted: 6.04s ──► Active: 3.01s ──► Finished at 9.05s (90.14 Mbps)
+
+Total Collective Wall-Clock Completion Time = 9.05 seconds
 </code></pre>
 
 <p>The GTL changes <strong>when the workload is admitted to the network socket</strong>, rather than simply increasing the physical network rate. Controlling admission concurrency isolates individual flows onto an unbuffered path, trading application queue time for loss-free network transmission.</p>
@@ -176,6 +237,9 @@ TCP Contention & Window Backoff
         │
         ▼
 408 TCP Retransmissions (48.30 Mbps avg active rate)
+        │
+        ▼
+Collective Barrier Completion Time: 8.30 seconds
 </code></pre>
 
 <h2>With ViYouna FCL / GTL (1 Token)</h2>
@@ -184,11 +248,14 @@ TCP Contention & Window Backoff
         ▼
 GTL Lease Request (UDP:5000)
         │
-        ├──────────────► Node 5201 Granted (0.00s wait) ──► 1 Active Flow (90.15 Mbps)
+        ├──────────────► Node 5201 Granted (0.00s wait) ──► Active (3.01s) ──► Done at 3.01s
         │
-        ├──────────────► Node 5203 Waits in RAM (2.42s)  ──► Sequential Execution
+        ├──────────────► Node 5203 Waits in RAM (2.42s)  ──► Active (3.01s) ──► Done at 5.43s
         │
-        └──────────────► Node 5202 Waits in RAM (6.04s)  ──► Sequential Execution
+        └──────────────► Node 5202 Waits in RAM (6.04s)  ──► Active (3.01s) ──► Done at 9.05s
+        │
+        ▼
+Collective Barrier Completion Time: 9.05 seconds
 </code></pre>
 
 <hr>
@@ -201,7 +268,7 @@ GTL Lease Request (UDP:5000)
 <h3>Next Steps (Level 4 Physical Validation)</h3>
 <p>To evaluate whether FCL improves real-world AI workload performance, future physical hardware experiments will measure:</p>
 <ul>
-  <li><strong>Total Collective Barrier Completion Time</strong> (including application wait time)</li>
+  <li><strong>Total Collective Barrier Completion Time</strong> across multi-token policies (1 vs 2 vs 3 tokens)</li>
   <li><strong>Direct Hardware Queue Drop Counters</strong> via <code>tc -s qdisc</code></li>
   <li><strong>Physical Switch ASIC Buffer Occupancy</strong></li>
   <li><strong>Statistical significance across N >= 30 randomized repetitions</strong></li>
