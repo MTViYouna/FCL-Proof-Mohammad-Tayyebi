@@ -46,7 +46,6 @@ try:
     t1 = time.time()
     cmd = ["iperf3", "-c", RECEIVER_IP, "-p", str(PORT), "-n", "100M", "-J"]
     
-    # timeout added to prevent indefinite hanging
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     t2 = time.time()
 
@@ -77,7 +76,6 @@ try:
     print(f"[+] Port {PORT} Finished | Wait: {wait_time:.2f}s | Transfer: {transfer_time:.2f}s | Retr: {total_retr}")
 
 finally:
-    # Guaranteed token release even if script crashes
     if FCL_ACTIVE and gtl_granted:
         try:
             sock.sendto(json.dumps({"action": "release"}).encode("utf-8"), (GTL_IP, 5000))
