@@ -9,6 +9,7 @@ FCL_ACTIVE = sys.argv[2] == "True"
 GTL_IP = sys.argv[3]
 RECEIVER_IP = sys.argv[4]
 METRICS_PATH = "/tmp/metrics.json"
+CLIENT_ID = f"port_{PORT}"
 
 if os.path.exists(METRICS_PATH): 
     os.remove(METRICS_PATH)
@@ -23,9 +24,8 @@ try:
         t0 = time.time()
         while True:
             try:
-                # Send idempotent request with explicit client_id
-                request_payload = json.dumps({"action": "request", "client_id": f"port_{PORT}"}).encode("utf-8")
-                sock.sendto(request_payload, (GTL_IP, 5000))
+                payload = json.dumps({"action": "request", "client_id": CLIENT_ID}).encode("utf-8")
+                sock.sendto(payload, (GTL_IP, 5000))
                 
                 data, _ = sock.recvfrom(1024)
                 if json.loads(data.decode("utf-8")).get("status") == "granted":
@@ -46,20 +46,23 @@ try:
         print(f"\n[Port {PORT}] TOKEN GRANTED! (Wait: {wait_time:.2f}s)")
 
     t1 = time.time()
-    cmd = ["iperf3", "-c", RECEIVER_IP, "-p", str(PORT), "-n", "100M", "-b", "90M", "-J"]
+    cmd = ["iperf3", "-c", RECEIVER_IP, "-p", str(PORT), "-n", "30M", "-b", "90M", "-J"]
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     t2 = time.time()
     
-    if res.returncode == 0:
+    # FAIL FAST: Do not generate metrics on failed transfers
+    if res.returncode != 0:
+        print(f"\n[!] iperf3 failed explicitly on Port {PORT}. Stderr: {res.stderr}")
+        sys.exit(1)
+
+    try:
         data = json.loads(res.stdout)
         total_retr = int(data["end"]["sum_sent"]["retransmits"])
         bps = data["end"]["sum_sent"]["bits_per_second"] / 1e6
         transfer_time = t2 - t1
-    else:
-        # Fallback metrics in case of network interrupt
-        total_retr = 9999
-        bps = 0.0
-        transfer_time = round(t2 - t1, 2)
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"\n[!] Unable to parse iperf3 telemetry on Port {PORT}: {e}")
+        sys.exit(1)
 
     metrics = {
         "Port": PORT, 
@@ -76,9 +79,8 @@ try:
 finally:
     if FCL_ACTIVE and gtl_granted:
         try: 
-            # Send lease release with matching client_id
-            release_payload = json.dumps({"action": "release", "client_id": f"port_{PORT}"}).encode("utf-8")
-            sock.sendto(release_payload, (GTL_IP, 5000))
+            payload = json.dumps({"action": "release", "client_id": CLIENT_ID}).encode("utf-8")
+            sock.sendto(payload, (GTL_IP, 5000))
         except Exception: 
             pass
     sock.close()

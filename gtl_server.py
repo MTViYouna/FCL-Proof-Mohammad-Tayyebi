@@ -1,6 +1,4 @@
-import socket
-import json
-import sys
+import socket, json, sys
 
 HOST = '0.0.0.0'
 PORT = 5000
@@ -10,7 +8,7 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind((HOST, PORT))
 
 available_tokens = TOTAL_TOKENS
-active_grants = set()  # Tracks client_ids currently holding tokens
+active_grants = set()  # Set of client_ids currently holding tokens
 
 print(f"[*] ViYouna GTL Server running on {HOST}:{PORT} (Total Tokens: {TOTAL_TOKENS})")
 
@@ -22,7 +20,7 @@ while True:
         client_id = request.get('client_id', str(addr[0]))
 
         if action == 'request':
-            # Idempotent re-grant: If client already holds token, re-send grant without decrementing
+            # Idempotent Grant: Re-issue token to same client without decrementing
             if client_id in active_grants:
                 response = {"status": "granted", "tokens_left": available_tokens}
             elif available_tokens > 0:
@@ -33,7 +31,7 @@ while True:
                 response = {"status": "denied", "tokens_left": available_tokens}
 
         elif action == 'release':
-            # Ownership check: Only increment if this specific client actually holds a lease
+            # Verified Release: Only return token if client holds active grant
             if client_id in active_grants:
                 active_grants.remove(client_id)
                 available_tokens = min(TOTAL_TOKENS, available_tokens + 1)
