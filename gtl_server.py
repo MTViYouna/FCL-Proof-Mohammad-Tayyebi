@@ -3,7 +3,7 @@ import json
 
 HOST = '0.0.0.0'
 PORT = 5000
-TOTAL_TOKENS = 2  # The safe injection limit (only allow 2 bursts at a time)
+TOTAL_TOKENS = 2  # The safe injection limit
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind((HOST, PORT))
