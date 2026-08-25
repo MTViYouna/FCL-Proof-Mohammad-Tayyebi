@@ -23,7 +23,10 @@ try:
         t0 = time.time()
         while True:
             try:
-                sock.sendto(json.dumps({"action": "request"}).encode("utf-8"), (GTL_IP, 5000))
+                # Send idempotent request with explicit client_id
+                request_payload = json.dumps({"action": "request", "client_id": f"port_{PORT}"}).encode("utf-8")
+                sock.sendto(request_payload, (GTL_IP, 5000))
+                
                 data, _ = sock.recvfrom(1024)
                 if json.loads(data.decode("utf-8")).get("status") == "granted":
                     gtl_granted = True
@@ -53,7 +56,7 @@ try:
         bps = data["end"]["sum_sent"]["bits_per_second"] / 1e6
         transfer_time = t2 - t1
     else:
-        # Fallback metric recording in case of network reset
+        # Fallback metrics in case of network interrupt
         total_retr = 9999
         bps = 0.0
         transfer_time = round(t2 - t1, 2)
@@ -73,7 +76,9 @@ try:
 finally:
     if FCL_ACTIVE and gtl_granted:
         try: 
-            sock.sendto(json.dumps({"action": "release"}).encode("utf-8"), (GTL_IP, 5000))
-        except: 
+            # Send lease release with matching client_id
+            release_payload = json.dumps({"action": "release", "client_id": f"port_{PORT}"}).encode("utf-8")
+            sock.sendto(release_payload, (GTL_IP, 5000))
+        except Exception: 
             pass
     sock.close()
