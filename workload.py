@@ -1,51 +1,100 @@
-$gtl_ip = (multipass info gtl-server --format json | ConvertFrom-Json).info.'gtl-server'.ipv4[0]
-$rcv_ip = (multipass info receiver --format json | ConvertFrom-Json).info.'receiver'.ipv4[0]
+import sys
+import time
+import json
+import socket
+import subprocess
+import os
 
-$script = @"
-import sys, time, json, socket, subprocess, os
+
+if len(sys.argv) != 5:
+    print(
+        "Usage: python3 workload.py "
+        "<receiver_port> <True|False> <gtl_ip> <receiver_ip>"
+    )
+    sys.exit(1)
+
 
 PORT = int(sys.argv[1])
-FCL_ACTIVE = sys.argv[2] == 'True'
-RECEIVER_IP = '$rcv_ip'
-GTL_IP = '$gtl_ip'
-METRICS_PATH = '/tmp/metrics.json'
+FCL_ACTIVE = sys.argv[2] == "True"
+GTL_IP = sys.argv[3]
+RECEIVER_IP = sys.argv[4]
 
-# Clean stale metrics file immediately on startup
+METRICS_PATH = "/tmp/metrics.json"
+
+# Remove stale telemetry.
 if os.path.exists(METRICS_PATH):
     os.remove(METRICS_PATH)
 
 wait_time = 0.0
 gtl_granted = False
 
+sock = None
+
 if FCL_ACTIVE:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(1.0)
+
     t0 = time.time()
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.settimeout(1.0)
-    
+
     while True:
         try:
-            s.sendto(json.dumps({'action':'request'}).encode(), (GTL_IP, 5000))
-            data, _ = s.recvfrom(1024)
-            if json.loads(data.decode()).get('status') == 'granted':
+            request = json.dumps({
+                "action": "request"
+            }).encode("utf-8")
+
+            sock.sendto(
+                request,
+                (GTL_IP, 5000)
+            )
+
+            data, _ = sock.recvfrom(1024)
+            response = json.loads(data.decode("utf-8"))
+
+            if response.get("status") == "granted":
                 gtl_granted = True
                 break
-        except (socket.timeout, Exception):
+
+        except (socket.timeout, OSError, ValueError):
             pass
-        
+
         elapsed = time.time() - t0
-        sys.stdout.write(f"\r[Port {PORT}] WAITING FOR GTL TOKEN... Elapsed: {elapsed:.1f}s")
-        sys.stdout.flush()
+
+        print(
+            f"[Port {PORT}] "
+            f"WAITING FOR GTL TOKEN... "
+            f"Elapsed: {elapsed:.1f}s",
+            end="\r",
+            flush=True
+        )
+
         time.sleep(0.3)
-        
+
     wait_time = time.time() - t0
-    sys.stdout.write(f"\r[Port {PORT}] TOKEN GRANTED! (Wait: {wait_time:.2f}s)\n")
-    sys.stdout.flush()
+
+    print(
+        f"[Port {PORT}] TOKEN GRANTED! "
+        f"(Wait: {wait_time:.2f}s)"
+    )
 
 t1 = time.time()
 
-# Run iperf3 with JSON formatting (-J) for programmatic accuracy
-cmd = ['iperf3', '-c', RECEIVER_IP, '-p', str(PORT), '-n', '100M', '-J']
-res = subprocess.run(cmd, capture_output=True, text=True)
+cmd = [
+    "iperf3",
+    "-c",
+    RECEIVER_IP,
+    "-p",
+    str(PORT),
+    "-n",
+    "100M",
+    "-J"
+]
+
+res = subprocess.run(
+    cmd,
+    capture_output=True,
+    text=True
+)
+
 t2 = time.time()
 
 total_retr = 0
@@ -53,20 +102,35 @@ bps = 0.0
 
 try:
     data = json.loads(res.stdout)
-    total_retr = data['end']['sum_sent']['retransmits']
-    bps = data['end']['sum_sent']['bits_per_second'] / 1e6
-except Exception:
-    pass
 
-if FCL_ACTIVE and gtl_granted:
+    total_retr = int(
+        data["end"]["sum_sent"]["retransmits"]
+    )
+
+    bps = (
+        data["end"]["sum_sent"]["bits_per_second"]
+        / 1e6
+    )
+
+except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+    print("[!] Unable to parse iperf3 JSON output.")
+
+if FCL_ACTIVE and gtl_granted and sock is not None:
     try:
-        s.sendto(json.dumps({'action':'release'}).encode(), (GTL_IP, 5000))
-    except:
+        sock.sendto(
+            json.dumps({
+                "action": "release"
+            }).encode("utf-8"),
+            (GTL_IP, 5000)
+        )
+    except OSError:
         pass
+
+if sock is not None:
+    sock.close()
 
 transfer_time = t2 - t1
 
-# Explicit measured telemetry output
 metrics = {
     "Port": PORT,
     "GTL_Enabled": FCL_ACTIVE,
@@ -77,11 +141,12 @@ metrics = {
     "Retransmissions": total_retr
 }
 
-with open(METRICS_PATH, 'w') as f:
+with open(METRICS_PATH, "w") as f:
     json.dump(metrics, f)
 
-print(f"[+] Port {PORT} Finished | Wait: {wait_time:.2f}s | Transfer: {transfer_time:.2f}s | Retr: {total_retr}")
-"@
-
-Set-Content -Path "workload_clean.py" -Value $script
-foreach ($vm in "sender-1", "sender-2", "sender-3") { multipass transfer workload_clean.py ${vm}:workload.py }
+print(
+    f"[+] Port {PORT} Finished | "
+    f"Wait: {wait_time:.2f}s | "
+    f"Transfer: {transfer_time:.2f}s | "
+    f"Retr: {total_retr}"
+)
