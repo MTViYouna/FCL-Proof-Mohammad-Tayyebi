@@ -1,20 +1,19 @@
+param(
+    [int]$Tokens = 1
+)
+
 $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 if (-not $ScriptDir) { $ScriptDir = $PWD.Path }
 
 Write-Host "====================================================" -ForegroundColor Cyan
 Write-Host " FABRIC COORDINATION LAYER (FCL) BENCHMARK SUITE   " -ForegroundColor Cyan
+Write-Host " Target GTL Token Limit: $Tokens                   " -ForegroundColor Cyan
 Write-Host "====================================================" -ForegroundColor Cyan
 
 $gtl_ip = (multipass info gtl-server --format json | ConvertFrom-Json).info.'gtl-server'.ipv4[0]
 $rcv_ip = (multipass info receiver --format json | ConvertFrom-Json).info.receiver.ipv4[0]
 $vms = @('sender-1', 'sender-2', 'sender-3')
-
-Write-Host "`n[*] Deploying scripts to cluster..." -ForegroundColor Yellow
-multipass transfer "$ScriptDir/setup_receiver.sh" receiver:/home/ubuntu/setup_receiver.sh
-foreach ($vm in $vms) {
-    multipass transfer "$ScriptDir/workload.py" "${vm}:/home/ubuntu/workload.py"
-}
 
 [System.Collections.ArrayList]$all_results = @()
 
@@ -22,12 +21,16 @@ function Invoke-BenchmarkRun {
     param([string]$Mode, [int]$TestOrder)
 
     Write-Host "`n-----------------------------------------------" -ForegroundColor Cyan
-    Write-Host " PREPARING TEST $TestOrder (FCL: $Mode)" -ForegroundColor Yellow
+    Write-Host " PREPARING TEST $TestOrder (FCL: $Mode, Tokens: $Tokens)" -ForegroundColor Yellow
     Write-Host "-----------------------------------------------" -ForegroundColor Cyan
 
     multipass exec receiver -- bash /home/ubuntu/setup_receiver.sh | Out-Null
-    $resetCmd = "import socket,json; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(2); s.sendto(json.dumps({'action':'reset'}).encode(), ('$gtl_ip', 5000))"
-    multipass exec sender-1 -- python3 -c $resetCmd
+
+    Write-Host "[*] Configuring GTL Server with $Tokens token(s)..."
+    multipass exec gtl-server -- sudo systemctl stop gtl-server 2>$null
+    multipass exec gtl-server -- pkill -9 -f gtl_server.py 2>$null
+    multipass exec gtl-server -- sudo systemd-run --unit=gtl-server python3 -u /home/ubuntu/gtl_server.py $Tokens | Out-Null
+    Start-Sleep -Seconds 1
 
     foreach ($vm in $vms) { multipass exec $vm -- rm -f /tmp/metrics.json }
 
@@ -52,7 +55,7 @@ function Invoke-BenchmarkRun {
         $obj = [PSCustomObject]@{
             "TestOrder"       = $TestOrder
             "Node / Port"     = "Node $($j.Port)"
-            "GTL Mode"        = if ($j.GTL_Enabled) { "With GTL" } else { "Without GTL" }
+            "GTL Mode"        = if ($j.GTL_Enabled) { "With GTL ($Tokens Token)" } else { "Without GTL" }
             "Wait Time"       = "$($j.TokenWait_s)s"
             "Transfer Time"   = "$($j.TransferTime_s)s"
             "Throughput"      = "$($j.Throughput_Mbps) Mbps"
